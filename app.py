@@ -9,9 +9,16 @@ app.secret_key = "supersecretkey"
 user_sessions = {}
 
 # Google Sheets setup
+import os
+import json
+
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+
+# Load Google credentials from an environment variable
+creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+
 sheet = client.open("Chicago Shows by Text").sheet1
 
 def get_tonight_shows():
