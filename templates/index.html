@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Chicago Shows by Text</title>
+</head>
+<body style="font-family: sans-serif; max-width: 600px; margin: auto; padding-top: 40px;">
+  <h2>🎭 Chicago Shows by Text</h2>
+  <form method="POST">
+    <input type="text" name="message" placeholder="Type a message..." style="width: 80%;" autofocus />
+    <input type="submit" value="Send" />
+  </form>
+  <div style="margin-top: 20px;">
+    {{ response|safe }}
+  </div>
+</body>
+</html>
