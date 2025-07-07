@@ -47,6 +47,10 @@ def get_shows_for_today():
 
     return matching_shows[:5] if matching_shows else ["No shows found for tonight."]
 
+@app.route("/", methods=["GET"])
+def home():
+    return "🎭 ShowNight is live and ready!"
+
 # Route for Twilio SMS
 @app.route("/sms", methods=["POST"])
 def sms_reply():
