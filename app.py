@@ -3,73 +3,145 @@ from twilio.twiml.messaging_response import MessagingResponse
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import json
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-# Set up Google Sheets access
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# ---------- Google‑Sheets setup ----------
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
 creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
-sheet = client.open("Chicago Shows by Text").sheet1
+sheet = client.open("Chicago Shows by Text").sheet1  # adjust if sheet name differs
 
-# Helper: Get today's shows
-def get_shows_for_today():
-    today = datetime.now().strftime("%A")
-    today_date = datetime.now().date()
+# ---------- Globals ----------
+user_last_shows: dict[str, list[dict]] = {}  # phone → list of show dicts
+CHI_TZ = ZoneInfo("America/Chicago")
+DAY_NAMES = [
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday"
+]
 
-    rows = sheet.get_all_records()
-    matching_shows = []
+# ---------- Helpers ----------
+def get_shows_for_today(limit: int = 5) -> list[dict]:
+    """Return up to `limit` shows running today with full details."""
+    now_chi = datetime.now(CHI_TZ)
+    today_date = now_chi.date()
+    weekday_name = now_chi.strftime("%A")  # e.g. "Monday"
+
+    rows = sheet.get_all_records(default_blank="")
+    shows = []
 
     for row in rows:
         try:
-            start_date = datetime.strptime(row["Start Date"], "%m/%d/%Y").date()
-            end_date = datetime.strptime(row["End Date"], "%m/%d/%Y").date()
-        except ValueError:
-            continue
+            start = datetime.strptime(row["StartDate"], "%m/%d/%Y").date()
+            end   = datetime.strptime(row["EndDate"], "%m/%d/%Y").date()
+        except (KeyError, ValueError):
+            continue  # skip rows with bad dates
 
-        if start_date <= today_date <= end_date:
-            show_time = row.get(today, "").strip()
-            if show_time:
-                title = row.get("Show Title", "").upper()
-                adj = row.get("Adjective", "").lower()
-                about = row.get("About", "")
-                venue = row.get("Venue", "")
-                neighborhood = row.get("Neighborhood", "")
-                cost = row.get("Cost", "")
-                time = show_time
+        if not (start <= today_date <= end):
+            continue  # not running today
 
-                show_str = f"{title} - a {adj} play about {about} at {venue} in {neighborhood}. {time}. ${cost}."
-                matching_shows.append(show_str)
+        # Pick today’s time or fall back to OtherTimes column
+        time_today = row.get(weekday_name, "").strip() or row.get("OtherTimes", "").strip()
+        if not time_today:
+            continue  # no performance today
 
-    return matching_shows[:5] if matching_shows else ["No shows found for tonight."]
+        show = {
+            "title":        row.get("Title", "").upper(),
+            "type":         row.get("Type", ""),
+            "adjective":    row.get("Adjective", "").lower(),
+            "about":        row.get("About", ""),
+            "venue":        row.get("Venue", ""),
+            "neighborhood": row.get("Neighborhood", ""),
+            "address":      row.get("Address", ""),
+            "time":         time_today,
+            "price":        row.get("Price", ""),
+            "website":      row.get("Website", ""),
+            "ticket_site":  row.get("TicketSite", ""),
+        }
+        shows.append(show)
 
+    return shows[:limit]
+
+def build_brief(show: dict) -> str:
+    """One‑line summary used in the list reply."""
+    return (
+        f"{show['title']} – a {show['adjective']} {show['type']} at "
+        f"{show['venue']} in {show['neighborhood']}. "
+        f"{show['time']}. ${show['price']}."
+    )
+
+def build_details(show: dict) -> str:
+    """Multi‑line detailed reply when user texts a number."""
+    ticket_link = show["ticket_site"] or show["website"] or "Check with venue."
+    return (
+        f"{show['title']}\n"
+        f"A {show['adjective']} {show['type']} about {show['about']}.\n"
+        f"Venue: {show['venue']}\n"
+        f"Address: {show['address']}\n"
+        f"Neighborhood: {show['neighborhood']}\n"
+        f"Time: {show['time']}\n"
+        f"Price: ${show['price']}\n"
+        f"Tickets: {ticket_link}"
+    )
+
+# ---------- Routes ----------
 @app.route("/", methods=["GET"])
 def home():
     return "🎭 ShowNight is live and ready!"
 
-# Route for Twilio SMS
 @app.route("/sms", methods=["POST"])
 def sms_reply():
-    incoming_msg = request.values.get("Body", "").strip().upper()
+    incoming = request.values.get("Body", "").strip()
+    from_number = request.values.get("From")
     resp = MessagingResponse()
 
-    if incoming_msg == "SHOWS TONIGHT":
+    # ---- Command: SHOWS TONIGHT ----
+    if incoming.upper() == "SHOWS TONIGHT":
         shows = get_shows_for_today()
-        reply = "Here are a few shows happening tonight:\n\n"
-        for i, show in enumerate(shows, 1):
-            reply += f"{i}. {show}\n\n"
-    else:
-        reply = "Try texting SHOWS TONIGHT to find out what's playing in Chicago."
+        if not shows:
+            resp.message("Sorry, I couldn't find any shows for tonight.")
+            return str(resp)
 
-    resp.message(reply.strip())
+        # Save full list for this user
+        user_last_shows[from_number] = shows
+
+        # Build list reply
+        reply_lines = ["Here are a few shows happening tonight:\n"]
+        for i, show in enumerate(shows, start=1):
+            reply_lines.append(f"{i}. {build_brief(show)}")
+        reply_lines.append("\nReply with the number of a show for more info.")
+        resp.message("\n\n".join(reply_lines))
+        return str(resp)
+
+    # ---- Command: digit (show details) ----
+    if incoming.isdigit():
+        index = int(incoming) - 1
+        shows = user_last_shows.get(from_number)
+        if shows and 0 <= index < len(shows):
+            resp.message(build_details(shows[index]))
+        else:
+            resp.message(
+                "I don't have that show number. "
+                "Text SHOWS TONIGHT to get the latest list."
+            )
+        return str(resp)
+
+    # ---- Fallback / help ----
+    resp.message(
+        "Welcome to ShowNight! "
+        "Text SHOWS TONIGHT to see what's playing in Chicago."
+    )
     return str(resp)
 
-import os
-
+# ---------- Main ----------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
