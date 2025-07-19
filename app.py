@@ -7,6 +7,22 @@ from zoneinfo import ZoneInfo
 import os
 import json
 
+@app.route("/test", methods=["GET", "POST"])
+def test_sms():
+    if request.method == "POST":
+        body = request.form.get("Body", "").strip()
+        from_number = request.form.get("From", "+19999999999")  # Fake test number
+        responses = handle_incoming_sms(body, from_number)
+        return "<br><br>".join(responses)
+    
+    return '''
+        <form method="post">
+            <label>Body: <input name="Body"></label><br>
+            <label>From: <input name="From" value="+19999999999"></label><br>
+            <button type="submit">Send</button>
+        </form>
+    '''
+
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
