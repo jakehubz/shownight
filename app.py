@@ -97,18 +97,16 @@ def build_details(show: dict) -> str:
 def home():
     return "🎭 ShowNight is live and ready!"
 
-@app.route("/sms", methods=["POST"])
-def sms_reply():
-    incoming = request.values.get("Body", "").strip()
-    from_number = request.values.get("From")
-    resp = MessagingResponse()
+def handle_incoming_sms(body, from_number):
+    response_messages = []
+    body = body.strip()
+    upper_body = body.upper()
 
     # ---- Command: SHOWS TONIGHT ----
-    if incoming.upper() == "SHOWS TONIGHT":
+    if upper_body == "SHOWS TONIGHT":
         shows = get_shows_for_today()
         if not shows:
-            resp.message("Sorry, I couldn't find any shows for tonight.")
-            return str(resp)
+            return ["Sorry, I couldn't find any shows for tonight."]
 
         # Save full list for this user
         user_last_shows[from_number] = shows
@@ -118,27 +116,36 @@ def sms_reply():
         for i, show in enumerate(shows, start=1):
             reply_lines.append(f"{i}. {build_brief(show)}")
         reply_lines.append("\nReply with the number of a show for more info.")
-        resp.message("\n\n".join(reply_lines))
-        return str(resp)
+        return ["\n\n".join(reply_lines)]
 
     # ---- Command: digit (show details) ----
-    if incoming.isdigit():
-        index = int(incoming) - 1
+    if body.isdigit():
+        index = int(body) - 1
         shows = user_last_shows.get(from_number)
         if shows and 0 <= index < len(shows):
-            resp.message(build_details(shows[index]))
+            return [build_details(shows[index])]
         else:
-            resp.message(
+            return [
                 "I don't have that show number. "
                 "Text SHOWS TONIGHT to get the latest list."
-            )
-        return str(resp)
+            ]
 
     # ---- Fallback / help ----
-    resp.message(
+    return [
         "Welcome to ShowNight! "
         "Text SHOWS TONIGHT to see what's playing in Chicago."
-    )
+    ]
+    
+@app.route("/sms", methods=["POST"])
+def sms_reply():
+    incoming = request.values.get("Body", "").strip()
+    from_number = request.values.get("From")
+    resp = MessagingResponse()
+
+    responses = handle_incoming_sms(incoming, from_number)
+    for msg in responses:
+        resp.message(msg)
+
     return str(resp)
 
 # ---------- Main ----------
