@@ -1,4 +1,6 @@
-from flask import Flask, request
+app = Flask(__name__)
+app.secret_key = "supersecretkey"from flask import Flask, request
+
 from twilio.twiml.messaging_response import MessagingResponse
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -22,9 +24,6 @@ def test_sms():
             <button type="submit">Send</button>
         </form>
     '''
-
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
 
 # ---------- Google‑Sheets setup ----------
 scope = [
