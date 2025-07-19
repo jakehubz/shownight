@@ -1,6 +1,4 @@
-app = Flask(__name__)
-app.secret_key = "supersecretkey"from flask import Flask, request
-
+from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -8,6 +6,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
 import json
+
+app = Flask(__name__)
+app.secret_key = "supersecretkey"
 
 @app.route("/test", methods=["GET", "POST"])
 def test_sms():
